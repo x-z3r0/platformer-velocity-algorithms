@@ -1,0 +1,20 @@
+# Don't check auto-generated stuff into git
+coverage
+build
+node_modules
+stats.json
+
+# Cruft
+.DS_Store
+npm-debug.log
+.idea
+/package-lock.json
+/*.iml
+
+/server/db
+server/db
+server/middlewares/api-tester.js
+server/middlewares/db.json
+
+/rest-client.private.env.json
+/app/components/CompanyContact/ticktock.http
