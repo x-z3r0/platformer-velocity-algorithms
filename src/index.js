@@ -1,111 +1,108 @@
-const canvas = document.createElement('canvas');
-document.body.appendChild(canvas);
-const ctx = canvas.getContext('2d');
+import * as canvas from './canvas';
+import {keysDown} from './keyMonitor';
+import * as diagnostics from './diagnostics';
 
-const resizeCanvas = () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-};
-window.addEventListener('resize',  resizeCanvas);
-resizeCanvas();
-
-const circles = [];
-
-const createCircle = (x, y, r) => {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 2 * Math.PI, false);
-    ctx.fillStyle = 'green';
-    ctx.fill();
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#65f061';
-    ctx.stroke();
-};
-
-const getDist = (x1, y1, x2, y2) => {
-    const xDiff = Math.abs(x1 - x2);
-    const yDiff = Math.abs(y1 - y2);
-    return Math.sqrt(xDiff ** 2 + yDiff ** 2 );
+const player = {
+  x: 0,
+  y: 0,
+  // Horizontal velocity.
+  xv: 0,
+  // Vertical velocity.
+  yv: 0,
+  // Maximum horizontal velocity.
+  xvMax: 10,
+  // Time to accelerate to maximum velocity in frames.
+  xvMaxTime: 30,
+  // Will set velocity to maximum once threshold is reached.
+  xvRoundThreshold: 0.90,
+  jumpHeight: 100,
+  // Time to reach the apex of the jump in frames.
+  jumpHeightTime: 15,
+  // Dimensions of the hitbox.
+  width: 75,
+  height: 75,
 };
 
-const getPos = () => {
-    let xpos = 0;
-    let ypos = 0;
-    let correctPosFound = false;
+// Y position of the ground.
+const groundLevel = player.height / -2;
 
-    while(!correctPosFound){
-        xpos = Math.floor(Math.random() * canvas.width) + 1;
-        ypos = Math.floor(Math.random() * canvas.height) + 1;
+const handlePhysics = p => {
+  // Calculate friction multiplier based on the time to accelerate to maximum velocity.
+  const frictionMultiplier = 1 - ((Math.log(1 - p.xvRoundThreshold) * -1) / p.xvMaxTime);
+  // Calculate gravity based on the jump height and time to reach the apex of the jump.
+  const gravity = (p.jumpHeight * 2) / (p.jumpHeightTime ** 2);
 
-        let isOutsideCircles = true;
-        for(let i = 0; i < circles.length; i++){
-            const c = circles[i];
-            const dist = getDist(xpos, ypos, c.cx, c.cy);
-            if(dist <= c.radius){
-                isOutsideCircles = false;
-                break;
-            }
-        }
+  // Apply force based on the maximum horizontal velocity and time to accelerate.
+  // If player presses right...
+  if(keysDown.has('d'))
+    p.xv += (p.xvMax / frictionMultiplier) - p.xvMax;
+  // If player presses left...
+  if(keysDown.has('a'))
+    p.xv -= (p.xvMax / frictionMultiplier) - p.xvMax;
 
-        correctPosFound = isOutsideCircles;
-    }
+  // If player jumps and is on the ground calculate the initial velocity to
+  // reach the jump height.
+  if(keysDown.has('w') && p.y === groundLevel + player.height / 2)
+    p.yv = (p.jumpHeight * 2) / p.jumpHeightTime;
 
-    return {cx: xpos, cy: ypos};
+  // Multiply the player's horizontal velocity by the friction multiplier to
+  // apply friction.
+  p.xv *= frictionMultiplier;
+  // Apply gravity to the player by reducing the player's vertical velocity
+  // every frame.
+  // Only half of the gravity is subtracted on the first frame to avoid an
+  // inefficient Euler integration.
+  p.yv -= gravity / 2;
+
+  // Horizontal velocity is set to the player's maximum horizontal velocity
+  // when reaching a threshold.
+  if(keysDown.has('d') && p.xvMax - p.xv < (1 - p.xvRoundThreshold))
+    p.xv = p.xvMax;
+  if(keysDown.has('a') && p.xvMax + p.xv < (1 - p.xvRoundThreshold))
+    p.xv = p.xvMax * -1;
+
+  // If the player is decelerating and has reached the threshold,
+  // set the horizontal velocity to 0.
+  if(Math.abs(p.xv) < (1 - p.xvRoundThreshold) && !keysDown.has('d') && !keysDown.has('a'))
+    p.xv = 0;
+
+  // Once the player's velocity has been calculated, add the velocity to
+  // the player's position.
+  p.x += p.xv;
+  p.y += p.yv;
+
+  // Subtract the second half of the gravity after it has been applied to
+  // the position to be added on the next frame.
+  p.yv -= gravity / 2;
+
+  // Check if player is below the ground and if so then set the
+  // player's y position to ground level.
+  if (p.y < groundLevel + player.height / 2) {
+    p.y = groundLevel + player.height / 2;
+    p.yv = 0;
+  }
+
+  // Check if player is outside borders and if so then set the
+  // player's x position to the border position.
+  if(Math.abs(p.x) > (canvas.getDim().w / 2) - (p.width / 2)) {
+    p.x = Math.sign(p.x) * ((canvas.getDim().w / 2) - (p.width / 2));
+    p.xv = 0;
+  }
 };
 
-const touchingEdge = (cx, cy, r) => {
-    return cx -  r <= 0 ||
-           cx +  r >= canvas.width ||
-           cy -  r <= 0 ||
-           cy +  r >= canvas.height;
+const drawPlayer = (ctx, p) => {
+  // Draws with cartesian coordinates and centers rectangle.
+  const drawX = (p.x - (p.width / 2)) + (canvas.getDim().w / 2);
+  const drawY = ((p.y * -1) - (p.height / 2)) + (canvas.getDim().h / 2);
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(drawX, drawY, p.width, p.height);
 };
 
-const touchingOtherCircle = (cx, cy, r) => {
-    for(let i = 0; i < circles.length; i++){
-        const c2 = circles[i];
-        if(c2.cx === cx && c2.cy === cy) { //must be same circle
-            continue;
-        }
-        const distance = getDist(c2.cx, c2.cy, cx, cy);
-        if(distance < c2.radius + r){
-            return true;
-        }
-    }
+canvas.init(ctx => {
+  handlePhysics(player);
 
-    return false;
-};
+  drawPlayer(ctx, player);
 
-const circle = () => {
-    let radius = 0;
-    let xyPos = getPos();
-    let cx = xyPos.cx;
-    let cy =  xyPos.cy;
-    let canGrow = true;
-    return {
-        get cx() { return cx; },
-        get cy() { return cy; },
-        get radius() { return radius; },
-        drawCircle(){
-            if(canGrow) {
-                if(touchingEdge(cx, cy, radius) || touchingOtherCircle(cx, cy, radius)) {
-                    canGrow = false;
-                } else {
-                    radius++;
-                }
-            }
-            createCircle( cx,  cy,  radius);
-        }
-    }
-};
-
-const draw = () => {
-  requestAnimationFrame(draw);
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  circles.push(new circle());
-
-  circles.forEach(c => c.drawCircle());
-};
-
-
-draw();
+  diagnostics.display(ctx, 21, player);
+});
